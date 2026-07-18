@@ -268,8 +268,8 @@ function PromptShaperAction({
             <Button
               type="button"
               variant="ghost"
-              size="sm"
-              className="h-7 px-2 text-xs text-muted-foreground"
+              size="icon"
+              className="size-7 text-muted-foreground"
               disabled={isDisabled}
               aria-label={isRunning ? "Improving prompt" : "Improve prompt"}
               onClick={() => void enhance()}
@@ -283,12 +283,9 @@ function PromptShaperAction({
               ) : (
                 <Icon name="AiScanText" aria-hidden="true" />
               )}
-              {isRunning ? "Improving…" : "Improve prompt"}
             </Button>
           </TooltipTrigger>
-          <TooltipContent side="top">
-            Rewrite this draft with clearer context and completion criteria
-          </TooltipContent>
+          <TooltipContent side="top">Improve prompt</TooltipContent>
         </Tooltip>
       </TooltipProvider>
 

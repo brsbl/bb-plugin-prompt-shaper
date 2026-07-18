@@ -5765,30 +5765,27 @@ function PromptShaperAction({
   const isDisabled = projectId === null || composer.text.trim().length === 0 || isRunning;
   return /* @__PURE__ */ jsxs(Fragment2, { children: [
     /* @__PURE__ */ jsx(TooltipProvider2, { delayDuration: 300, children: /* @__PURE__ */ jsxs(Tooltip2, { children: [
-      /* @__PURE__ */ jsx(TooltipTrigger2, { asChild: true, children: /* @__PURE__ */ jsxs(
+      /* @__PURE__ */ jsx(TooltipTrigger2, { asChild: true, children: /* @__PURE__ */ jsx(
         Button,
         {
           type: "button",
           variant: "ghost",
-          size: "sm",
-          className: "h-7 px-2 text-xs text-muted-foreground",
+          size: "icon",
+          className: "size-7 text-muted-foreground",
           disabled: isDisabled,
           "aria-label": isRunning ? "Improving prompt" : "Improve prompt",
           onClick: () => void enhance(),
-          children: [
-            isRunning ? /* @__PURE__ */ jsx(
-              Icon,
-              {
-                name: "Loading",
-                className: "animate-spin",
-                "aria-hidden": "true"
-              }
-            ) : /* @__PURE__ */ jsx(Icon, { name: "AiScanText", "aria-hidden": "true" }),
-            isRunning ? "Improving\u2026" : "Improve prompt"
-          ]
+          children: isRunning ? /* @__PURE__ */ jsx(
+            Icon,
+            {
+              name: "Loading",
+              className: "animate-spin",
+              "aria-hidden": "true"
+            }
+          ) : /* @__PURE__ */ jsx(Icon, { name: "AiScanText", "aria-hidden": "true" })
         }
       ) }),
-      /* @__PURE__ */ jsx(TooltipContent2, { side: "top", children: "Rewrite this draft with clearer context and completion criteria" })
+      /* @__PURE__ */ jsx(TooltipContent2, { side: "top", children: "Improve prompt" })
     ] }) }),
     /* @__PURE__ */ jsx(
       Dialog2,

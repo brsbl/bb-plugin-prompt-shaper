@@ -237,6 +237,10 @@
       width: calc(var(--spacing) * 4);
       height: calc(var(--spacing) * 4);
     }
+    .size-7 {
+      width: calc(var(--spacing) * 7);
+      height: calc(var(--spacing) * 7);
+    }
     .size-auto {
       width: auto;
       height: auto;
