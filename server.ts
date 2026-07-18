@@ -1,4 +1,4 @@
-import { defineRpcContract, type BbPluginApi } from "@bb/plugin-sdk";
+import type { BbPluginApi } from "@bb/plugin-sdk";
 import { z } from "zod";
 
 import {
@@ -37,7 +37,7 @@ const enhancementRecordSchema = z.discriminatedUnion("status", [
 type EnhancementRecord = z.infer<typeof enhancementRecordSchema>;
 type RunningRecord = Extract<EnhancementRecord, { status: "running" }>;
 
-export const rpcContract = defineRpcContract({
+export const rpcContract = {
   startEnhancement: {
     input: z.object({
       requestId: requestIdSchema,
@@ -58,7 +58,7 @@ export const rpcContract = defineRpcContract({
     input: z.object({ requestId: requestIdSchema }),
     output: enhancementRecordSchema.nullable(),
   },
-});
+} as const;
 
 function requestKey(requestId: string): string {
   return `${REQUEST_PREFIX}${requestId}`;

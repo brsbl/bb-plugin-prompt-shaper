@@ -10,9 +10,6 @@ var __export = (target, all) => {
     __defProp(target, name, { get: all[name], enumerable: true });
 };
 
-// server.ts
-import { defineRpcContract } from "@bb/plugin-sdk";
-
 // node_modules/zod/v4/classic/external.js
 var external_exports = {};
 __export(external_exports, {
@@ -14594,7 +14591,7 @@ var enhancementRecordSchema = external_exports.discriminatedUnion("status", [
     completedAt: external_exports.number().int().nonnegative()
   })
 ]);
-var rpcContract = defineRpcContract({
+var rpcContract = {
   startEnhancement: {
     input: external_exports.object({
       requestId: requestIdSchema,
@@ -14611,7 +14608,7 @@ var rpcContract = defineRpcContract({
     input: external_exports.object({ requestId: requestIdSchema }),
     output: enhancementRecordSchema.nullable()
   }
-});
+};
 function requestKey(requestId) {
   return `${REQUEST_PREFIX}${requestId}`;
 }
