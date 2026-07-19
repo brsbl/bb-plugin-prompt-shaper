@@ -5058,16 +5058,14 @@ function PromptShaperAction({
       const record = await rpc.call("getEnhancement", { requestId });
       if (pendingRef.current !== active) return;
       if (record === null || record.status === "running") return;
+      if (active.scopeKey !== composerScopeKeyRef.current) {
+        clearLoadingEffects();
+        return;
+      }
       clearLoadingEffects();
       setPendingRequest(null);
       if (record.status === "failed") {
         toast.error(record.error);
-        return;
-      }
-      if (active.scopeKey !== composerScopeKeyRef.current) {
-        toast.info(
-          "Enhancement finished after you changed composers. Nothing was replaced."
-        );
         return;
       }
       applyEnhancement(record.enhancedPrompt);

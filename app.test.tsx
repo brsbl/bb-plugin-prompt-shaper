@@ -435,6 +435,63 @@ describe("Prompt Shaper composer action", () => {
     expect(getTestPluginRuntime().attachments).toEqual(["source-brief.png"]);
   });
 
+  it("preserves a completion that races with thread navigation", async () => {
+    const result = deferred<{
+      requestId: string;
+      helperThreadId: string;
+      status: "complete";
+      enhancedPrompt: string;
+      assumptions: null;
+      createdAt: number;
+      completedAt: number;
+    }>();
+    resetTestPluginRuntime({
+      text: "rough source draft",
+      scope: { kind: "thread", threadId: "thr_source" },
+      rpc: {
+        startEnhancement: () => ({
+          requestId: REQUEST_ID,
+          helperThreadId: "thr_helper",
+        }),
+        getEnhancement: () => result.promise,
+        cancelEnhancement: () => ({ cancelled: true as const }),
+      },
+    });
+    const Action = await loadAction();
+    render(<Action projectId="proj_1" threadId="thr_source" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Improve prompt" }));
+    await waitFor(() => expect(window.sessionStorage.length).toBe(1));
+
+    await act(async () => {
+      setTestComposerScope({ kind: "thread", threadId: "thr_other" });
+      setTestComposerText("other thread draft");
+      result.resolve({
+        requestId: REQUEST_ID,
+        helperThreadId: "thr_helper",
+        status: "complete",
+        enhancedPrompt: "Enhanced while navigating.",
+        assumptions: null,
+        createdAt: 1,
+        completedAt: 2,
+      });
+      await result.promise;
+    });
+
+    expect(getTestPluginRuntime().text).toBe("other thread draft");
+    expect(window.sessionStorage.length).toBe(1);
+
+    act(() => {
+      setTestComposerScope({ kind: "thread", threadId: "thr_source" });
+      setTestComposerText("rough source draft");
+    });
+
+    await waitFor(() => {
+      expect(getTestPluginRuntime().text).toBe("Enhanced while navigating.");
+      expect(window.sessionStorage.length).toBe(0);
+    });
+  });
+
   it("invalidates inline Undo after the enhanced draft is edited or sent", async () => {
     resetTestPluginRuntime({
       text: "rough draft",

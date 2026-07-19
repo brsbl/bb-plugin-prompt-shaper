@@ -247,18 +247,22 @@ function PromptShaperAction({
       const record = await rpc.call("getEnhancement", { requestId });
       if (pendingRef.current !== active) return;
       if (record === null || record.status === "running") return;
+
+      // A composer change is visible during render before the passive scope
+      // reconciliation effect moves pendingRef to the destination scope. Do
+      // not delete the source scope's durable request in that window. Thread
+      // navigation can recover and consume the terminal result on return;
+      // non-thread scope changes are still cleared/cancelled by reconciliation.
+      if (active.scopeKey !== composerScopeKeyRef.current) {
+        clearLoadingEffects();
+        return;
+      }
+
       clearLoadingEffects();
       setPendingRequest(null);
 
       if (record.status === "failed") {
         toast.error(record.error);
-        return;
-      }
-
-      if (active.scopeKey !== composerScopeKeyRef.current) {
-        toast.info(
-          "Enhancement finished after you changed composers. Nothing was replaced.",
-        );
         return;
       }
       applyEnhancement(record.enhancedPrompt);
