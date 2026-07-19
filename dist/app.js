@@ -5139,9 +5139,17 @@ function PromptShaperAction({
         size: "icon",
         className: "size-7 text-muted-foreground",
         disabled: isDisabled,
+        "aria-busy": isRunning,
         "aria-label": isRunning ? "Cancel prompt improvement" : "Improve prompt",
         onClick: () => void (isRunning ? cancel() : enhance()),
-        children: isRunning ? /* @__PURE__ */ jsx(Icon, { name: "X", "aria-hidden": "true" }) : /* @__PURE__ */ jsx(Icon, { name: "AiScanText", "aria-hidden": "true" })
+        children: /* @__PURE__ */ jsx(
+          Icon,
+          {
+            name: "AiScanText",
+            className: isRunning ? "animate-shine-icon" : void 0,
+            "aria-hidden": "true"
+          }
+        )
       }
     ) }),
     /* @__PURE__ */ jsx(TooltipContent2, { side: "top", children: isRunning ? "Cancel" : "Improve prompt" })

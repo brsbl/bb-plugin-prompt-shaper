@@ -101,7 +101,11 @@ describe("Prompt Shaper composer action", () => {
     const Action = await loadAction();
     render(<Action projectId="proj_1" threadId="thr_source" />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Improve prompt" }));
+    const improveButton = screen.getByRole("button", {
+      name: "Improve prompt",
+    });
+    expect((improveButton as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(improveButton);
 
     await waitFor(() => {
       expect(getTestPluginRuntime().text).toBe("Improved queued draft.");
@@ -214,9 +218,13 @@ describe("Prompt Shaper composer action", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Improve prompt" }));
     await waitFor(() => {
-      expect(
-        screen.getByRole("button", { name: "Cancel prompt improvement" }),
-      ).not.toBeNull();
+      const cancelButton = screen.getByRole("button", {
+        name: "Cancel prompt improvement",
+      });
+      expect(cancelButton.getAttribute("aria-busy")).toBe("true");
+      const icon = cancelButton.querySelector('[data-icon="AiScanText"]');
+      expect(icon).not.toBeNull();
+      expect(icon?.classList.contains("animate-shine-icon")).toBe(true);
       expect(getTestPluginRuntime().threadRowStatus).not.toBeNull();
       expect(
         getTestPluginRuntime().rpcCalls.map((call) => call.method),

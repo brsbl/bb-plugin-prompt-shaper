@@ -289,16 +289,17 @@ function PromptShaperAction({
             size="icon"
             className="size-7 text-muted-foreground"
             disabled={isDisabled}
+            aria-busy={isRunning}
             aria-label={
               isRunning ? "Cancel prompt improvement" : "Improve prompt"
             }
             onClick={() => void (isRunning ? cancel() : enhance())}
           >
-            {isRunning ? (
-              <Icon name="X" aria-hidden="true" />
-            ) : (
-              <Icon name="AiScanText" aria-hidden="true" />
-            )}
+            <Icon
+              name="AiScanText"
+              className={isRunning ? "animate-shine-icon" : undefined}
+              aria-hidden="true"
+            />
           </Button>
         </TooltipTrigger>
         <TooltipContent side="top">
