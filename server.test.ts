@@ -110,6 +110,9 @@ describe("Prompt Shaper cancellation", () => {
   it("stops and archives the helper, clears persisted work, and rejects a late result", async () => {
     const harness = await createHarness();
     await harness.rpc.startEnhancement(START_INPUT);
+    expect(harness.threads.spawn).toHaveBeenCalledWith(
+      expect.objectContaining({ permissionMode: "workspace-write" }),
+    );
 
     await expect(
       harness.rpc.cancelEnhancement({ requestId: REQUEST_ID }),

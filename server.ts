@@ -214,7 +214,7 @@ export default async function plugin(bb: BbPluginApi) {
         projectId: input.projectId,
         prompt: buildWorkerPrompt({ draft: input.draft }),
         environment: { type: "project-default" },
-        permissionMode: "auto",
+        permissionMode: "workspace-write",
         visibility: "hidden",
         title: "Prompt Shaper",
       });
@@ -244,7 +244,7 @@ export default async function plugin(bb: BbPluginApi) {
           model: execution.model,
           reasoningLevel: execution.reasoningLevel,
           serviceTier: execution.serviceTier,
-          permissionMode: "auto",
+          permissionMode: "workspace-write",
           sourceThreadId: input.sourceThreadId,
           originKind: "side-chat",
           visibility: "hidden",
@@ -274,7 +274,7 @@ export default async function plugin(bb: BbPluginApi) {
             reasoningLevel: execution.reasoningLevel,
             serviceTier: execution.serviceTier,
           }),
-      permissionMode: "auto",
+      permissionMode: "workspace-write",
       visibility: "hidden",
       title: "Prompt Shaper",
     });
