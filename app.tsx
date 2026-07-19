@@ -80,6 +80,8 @@ function savePendingRequest(request: PendingRequest): void {
 
 function clearPendingRequest(request: PendingRequest): void {
   try {
+    const stored = loadPendingRequest(request.scopeKey);
+    if (stored?.requestId !== request.requestId) return;
     window.sessionStorage.removeItem(pendingStorageKey(request.scopeKey));
   } catch {
     // Session storage is a recovery aid; enhancement still works without it.
@@ -309,6 +311,24 @@ function PromptShaperAction({
         projectId,
         sourceThreadId: threadId,
       });
+    } catch (error) {
+      // Startup can fail after navigation has detached this component. Clear
+      // the exact durable marker even when this instance no longer owns the
+      // active composer, or returning would recover a request the server never
+      // created and leave the action running indefinitely.
+      clearPendingRequest(request);
+      if (pendingRef.current !== request) return;
+      clearLoadingEffects();
+      setPendingRequest(null);
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Could not enhance the prompt.",
+      );
+      return;
+    }
+
+    try {
       await consumeResult(request.requestId);
     } catch (error) {
       if (pendingRef.current !== request) return;

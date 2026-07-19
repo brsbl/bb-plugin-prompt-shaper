@@ -4936,6 +4936,8 @@ function savePendingRequest(request) {
 }
 function clearPendingRequest(request) {
   try {
+    const stored = loadPendingRequest(request.scopeKey);
+    if (stored?.requestId !== request.requestId) return;
     window.sessionStorage.removeItem(pendingStorageKey(request.scopeKey));
   } catch {
   }
@@ -5107,6 +5109,17 @@ function PromptShaperAction({
         projectId,
         sourceThreadId: threadId
       });
+    } catch (error) {
+      clearPendingRequest(request);
+      if (pendingRef.current !== request) return;
+      clearLoadingEffects();
+      setPendingRequest(null);
+      toast.error(
+        error instanceof Error ? error.message : "Could not enhance the prompt."
+      );
+      return;
+    }
+    try {
       await consumeResult(request.requestId);
     } catch (error) {
       if (pendingRef.current !== request) return;

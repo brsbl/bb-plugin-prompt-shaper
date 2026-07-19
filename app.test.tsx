@@ -898,6 +898,46 @@ describe("Prompt Shaper composer action", () => {
     ]);
   });
 
+  it("clears a detached pending marker when helper startup fails", async () => {
+    let rejectStart!: (error: Error) => void;
+    const start = new Promise<never>((_resolve, reject) => {
+      rejectStart = reject;
+    });
+    resetTestPluginRuntime({
+      text: "draft whose helper cannot start",
+      scope: { kind: "thread", threadId: "thr_source" },
+      rpc: {
+        startEnhancement: () => start,
+        getEnhancement: () => null,
+      },
+    });
+    const Action = await loadAction();
+    const view = render(
+      <Action projectId="proj_1" threadId="thr_source" />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Improve prompt" }));
+    await waitFor(() => expect(window.sessionStorage.length).toBe(1));
+
+    view.unmount();
+    await act(async () => {
+      rejectStart(new Error("agent unavailable"));
+      await Promise.resolve();
+    });
+
+    expect(window.sessionStorage.length).toBe(0);
+    expect(getTestPluginRuntime().text).toBe(
+      "draft whose helper cannot start",
+    );
+
+    render(<Action projectId="proj_1" threadId="thr_source" />);
+    expect(
+      screen.getByRole("button", { name: "Improve prompt" }),
+    ).not.toBeNull();
+    expect(getTestPluginRuntime().textEffect).toBeNull();
+    expect(getTestPluginRuntime().threadRowStatus).toBeNull();
+  });
+
   it("keeps recovered pending work through StrictMode and a real unmount", async () => {
     const cancelEnhancement = vi.fn(() => ({ cancelled: true as const }));
     window.sessionStorage.setItem(
