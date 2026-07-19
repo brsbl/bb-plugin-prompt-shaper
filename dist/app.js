@@ -4936,6 +4936,8 @@ function savePendingRequest(request) {
 }
 function clearPendingRequest(request) {
   try {
+    const stored = loadPendingRequest(request.scopeKey);
+    if (stored?.requestId !== request.requestId) return;
     window.sessionStorage.removeItem(pendingStorageKey(request.scopeKey));
   } catch {
   }
@@ -4956,6 +4958,7 @@ function PromptShaperAction({
   const [pending, setPending] = useState(
     () => loadPendingRequest(composerScopeKey)
   );
+  const reconcileRecoveredPendingRef = useRef(pending !== null);
   const pendingRef = useRef(pending);
   const composerRef = useRef(composer);
   const composerScopeKeyRef = useRef(composerScopeKey);
@@ -4977,13 +4980,20 @@ function PromptShaperAction({
   }, []);
   useEffect(() => {
     if (previousComposerScopeKeyRef.current === composerScopeKey) return;
+    const previousComposerScopeKey = previousComposerScopeKeyRef.current;
     previousComposerScopeKeyRef.current = composerScopeKey;
     const staleRequest = pendingRef.current;
-    if (staleRequest === null) return;
-    setPendingRequest(null);
-    void rpc.call("cancelEnhancement", { requestId: staleRequest.requestId }).catch(() => {
-    });
-  }, [composerScopeKey, rpc, setPendingRequest]);
+    const isThreadNavigation = previousComposerScopeKey.startsWith("thread:") && composerScopeKey.startsWith("thread:");
+    if (staleRequest !== null && !isThreadNavigation) {
+      clearPendingRequest(staleRequest);
+      void rpc.call("cancelEnhancement", { requestId: staleRequest.requestId }).catch(() => {
+      });
+    }
+    const recoveredRequest = loadPendingRequest(composerScopeKey);
+    pendingRef.current = recoveredRequest;
+    reconcileRecoveredPendingRef.current = recoveredRequest !== null;
+    setPending(recoveredRequest);
+  }, [composerScopeKey, rpc]);
   useEffect(() => {
     composer.setTextEffect?.(isRunning ? "shimmer" : null);
     composer.setThreadRowStatus?.(isRunning ? THREAD_ROW_STATUS : null);
@@ -4999,6 +5009,18 @@ function PromptShaperAction({
       composer.setThreadRowStatus?.(null);
     };
   }, [composer.setTextEffect, composer.setThreadRowStatus, composerScopeKey]);
+  useEffect(() => {
+    const recoveredRequest = loadPendingRequest(
+      composerScopeKeyRef.current
+    );
+    if (pendingRef.current === null && recoveredRequest !== null) {
+      pendingRef.current = recoveredRequest;
+      setPending(recoveredRequest);
+    }
+    return () => {
+      pendingRef.current = null;
+    };
+  }, []);
   const clearLoadingEffects = useCallback(() => {
     composerRef.current.setTextEffect?.(null);
     composerRef.current.setThreadRowStatus?.(null);
@@ -5038,16 +5060,14 @@ function PromptShaperAction({
       const record = await rpc.call("getEnhancement", { requestId });
       if (pendingRef.current !== active) return;
       if (record === null || record.status === "running") return;
+      if (active.scopeKey !== composerScopeKeyRef.current) {
+        clearLoadingEffects();
+        return;
+      }
       clearLoadingEffects();
       setPendingRequest(null);
       if (record.status === "failed") {
         toast.error(record.error);
-        return;
-      }
-      if (active.scopeKey !== composerScopeKeyRef.current) {
-        toast.info(
-          "Enhancement finished after you changed composers. Nothing was replaced."
-        );
         return;
       }
       applyEnhancement(record.enhancedPrompt);
@@ -5060,6 +5080,10 @@ function PromptShaperAction({
   });
   useEffect(() => {
     if (!isRunning || pending === null) return;
+    if (reconcileRecoveredPendingRef.current) {
+      reconcileRecoveredPendingRef.current = false;
+      void consumeResult(pending.requestId);
+    }
     const timer = window.setInterval(() => {
       void consumeResult(pending.requestId);
     }, 2e3);
@@ -5085,6 +5109,17 @@ function PromptShaperAction({
         projectId,
         sourceThreadId: threadId
       });
+    } catch (error) {
+      clearPendingRequest(request);
+      if (pendingRef.current !== request) return;
+      clearLoadingEffects();
+      setPendingRequest(null);
+      toast.error(
+        error instanceof Error ? error.message : "Could not enhance the prompt."
+      );
+      return;
+    }
+    try {
       await consumeResult(request.requestId);
     } catch (error) {
       if (pendingRef.current !== request) return;
@@ -5123,66 +5158,56 @@ function PromptShaperAction({
   }, [clearLoadingEffects, rpc, setPendingRequest]);
   const isDisabled = !isRunning && (projectId === null || composer.text.trim().length === 0);
   const actionLabel = isRunning ? "Cancel prompt improvement" : "Improve prompt";
+  const controlLabel = canUndo ? "Undo prompt" : actionLabel;
   const iconName = isRunning ? showCancelIcon ? "X" : "AiContentGenerator01" : "AiContentGenerator01";
-  return /* @__PURE__ */ jsx(TooltipProvider2, { delayDuration: 300, children: /* @__PURE__ */ jsxs("div", { className: "flex items-center", "data-prompt-shaper-actions": true, children: [
-    /* @__PURE__ */ jsxs(Tooltip2, { children: [
-      /* @__PURE__ */ jsx(TooltipTrigger2, { asChild: true, children: /* @__PURE__ */ jsx(
-        Button,
-        {
-          type: "button",
-          variant: "ghost",
-          size: "icon",
-          className: isRunning && !showCancelIcon ? "size-7 text-success" : "size-7 text-muted-foreground",
-          disabled: isDisabled,
-          "aria-busy": isRunning,
-          "aria-label": actionLabel,
-          onMouseDown: (event) => {
-            event.preventDefault();
-          },
-          onBlur: () => setIsKeyboardFocused(false),
-          onFocus: (event) => setIsKeyboardFocused(
-            event.currentTarget.matches(":focus-visible")
-          ),
-          onMouseEnter: () => setIsHovered(true),
-          onMouseLeave: () => setIsHovered(false),
-          onClick: () => void (isRunning ? cancel() : enhance()),
-          children: /* @__PURE__ */ jsx(
-            "span",
-            {
-              className: isRunning && !showCancelIcon ? "inline-flex size-4 items-center justify-center motion-safe:animate-pulse" : "inline-flex size-4 items-center justify-center",
-              children: /* @__PURE__ */ jsx(
-                Icon,
-                {
-                  name: iconName,
-                  className: isRunning && !showCancelIcon ? "animate-shine-icon motion-safe:[animation-duration:1.5s]" : void 0,
-                  "aria-hidden": "true"
-                }
-              )
-            }
-          )
-        }
-      ) }),
-      /* @__PURE__ */ jsx(TooltipContent2, { side: "top", children: isRunning ? "Cancel" : "Improve prompt" })
-    ] }),
-    canUndo ? /* @__PURE__ */ jsxs(Tooltip2, { children: [
-      /* @__PURE__ */ jsx(TooltipTrigger2, { asChild: true, children: /* @__PURE__ */ jsx(
-        Button,
-        {
-          type: "button",
-          variant: "ghost",
-          size: "icon",
-          className: "size-7 text-muted-foreground",
-          "aria-label": "Undo prompt",
-          onMouseDown: (event) => {
-            event.preventDefault();
-          },
-          onClick: undo,
-          children: /* @__PURE__ */ jsx(Icon, { name: "ArrowTurnBackward", "aria-hidden": "true" })
-        }
-      ) }),
-      /* @__PURE__ */ jsx(TooltipContent2, { side: "top", children: "Undo prompt" })
-    ] }) : null
-  ] }) });
+  return /* @__PURE__ */ jsx(TooltipProvider2, { delayDuration: 300, children: /* @__PURE__ */ jsx("div", { className: "flex items-center", "data-prompt-shaper-actions": true, children: /* @__PURE__ */ jsxs(Tooltip2, { children: [
+    /* @__PURE__ */ jsx(TooltipTrigger2, { asChild: true, children: /* @__PURE__ */ jsx(
+      Button,
+      {
+        type: "button",
+        variant: "ghost",
+        size: "icon",
+        className: canUndo ? "h-7 w-auto gap-1 px-1.5 text-muted-foreground" : isRunning && !showCancelIcon ? "size-7 text-success" : "size-7 text-muted-foreground",
+        disabled: isDisabled,
+        "aria-busy": isRunning,
+        "aria-label": controlLabel,
+        onMouseDown: (event) => {
+          event.preventDefault();
+        },
+        onBlur: () => setIsKeyboardFocused(false),
+        onFocus: (event) => setIsKeyboardFocused(
+          event.currentTarget.matches(":focus-visible")
+        ),
+        onMouseEnter: () => setIsHovered(true),
+        onMouseLeave: () => setIsHovered(false),
+        onClick: () => {
+          if (canUndo) {
+            undo();
+            return;
+          }
+          void (isRunning ? cancel() : enhance());
+        },
+        children: canUndo ? /* @__PURE__ */ jsxs(Fragment2, { children: [
+          /* @__PURE__ */ jsx(Icon, { name: "AiContentGenerator01", "aria-hidden": "true" }),
+          /* @__PURE__ */ jsx(Icon, { name: "ArrowTurnBackward", "aria-hidden": "true" })
+        ] }) : /* @__PURE__ */ jsx(
+          "span",
+          {
+            className: isRunning && !showCancelIcon ? "inline-flex size-4 items-center justify-center motion-safe:animate-pulse" : "inline-flex size-4 items-center justify-center",
+            children: /* @__PURE__ */ jsx(
+              Icon,
+              {
+                name: iconName,
+                className: isRunning && !showCancelIcon ? "animate-shine-icon motion-safe:[animation-duration:1.5s]" : void 0,
+                "aria-hidden": "true"
+              }
+            )
+          }
+        )
+      }
+    ) }),
+    /* @__PURE__ */ jsx(TooltipContent2, { side: "top", children: canUndo ? "Undo prompt" : isRunning ? "Cancel" : "Improve prompt" })
+  ] }) }) });
 }
 var app_default = definePluginApp((app) => {
   app.slots.composerAccessory({

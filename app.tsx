@@ -80,6 +80,8 @@ function savePendingRequest(request: PendingRequest): void {
 
 function clearPendingRequest(request: PendingRequest): void {
   try {
+    const stored = loadPendingRequest(request.scopeKey);
+    if (stored?.requestId !== request.requestId) return;
     window.sessionStorage.removeItem(pendingStorageKey(request.scopeKey));
   } catch {
     // Session storage is a recovery aid; enhancement still works without it.
@@ -111,6 +113,7 @@ function PromptShaperAction({
   const [pending, setPending] = useState<PendingRequest | null>(() =>
     loadPendingRequest(composerScopeKey),
   );
+  const reconcileRecoveredPendingRef = useRef(pending !== null);
   const pendingRef = useRef<PendingRequest | null>(pending);
   const composerRef = useRef(composer);
   const composerScopeKeyRef = useRef(composerScopeKey);
@@ -137,17 +140,28 @@ function PromptShaperAction({
 
   useEffect(() => {
     if (previousComposerScopeKeyRef.current === composerScopeKey) return;
+    const previousComposerScopeKey = previousComposerScopeKeyRef.current;
     previousComposerScopeKeyRef.current = composerScopeKey;
     const staleRequest = pendingRef.current;
-    if (staleRequest === null) return;
-    setPendingRequest(null);
-    void rpc
-      .call("cancelEnhancement", { requestId: staleRequest.requestId })
-      .catch(() => {
-        // Scope changes invalidate the local request even if the helper has
-        // already exited or the cancellation transport is unavailable.
-      });
-  }, [composerScopeKey, rpc, setPendingRequest]);
+    const isThreadNavigation =
+      previousComposerScopeKey.startsWith("thread:") &&
+      composerScopeKey.startsWith("thread:");
+
+    if (staleRequest !== null && !isThreadNavigation) {
+      clearPendingRequest(staleRequest);
+      void rpc
+        .call("cancelEnhancement", { requestId: staleRequest.requestId })
+        .catch(() => {
+          // The old scope is already invalidated locally even if the helper
+          // has exited or cancellation transport is unavailable.
+        });
+    }
+
+    const recoveredRequest = loadPendingRequest(composerScopeKey);
+    pendingRef.current = recoveredRequest;
+    reconcileRecoveredPendingRef.current = recoveredRequest !== null;
+    setPending(recoveredRequest);
+  }, [composerScopeKey, rpc]);
 
   useEffect(() => {
     composer.setTextEffect?.(isRunning ? "shimmer" : null);
@@ -170,6 +184,23 @@ function PromptShaperAction({
       composer.setThreadRowStatus?.(null);
     };
   }, [composer.setTextEffect, composer.setThreadRowStatus, composerScopeKey]);
+
+  useEffect(() => {
+    const recoveredRequest = loadPendingRequest(
+      composerScopeKeyRef.current,
+    );
+    if (pendingRef.current === null && recoveredRequest !== null) {
+      pendingRef.current = recoveredRequest;
+      setPending(recoveredRequest);
+    }
+    return () => {
+      // Detach this component instance from any in-flight async work without
+      // cancelling the durable request. Navigating away and ordinary host
+      // remounts both unmount composer accessories; the next instance for the
+      // same scope recovers the request from session storage and reconciles it.
+      pendingRef.current = null;
+    };
+  }, []);
 
   const clearLoadingEffects = useCallback(() => {
     composerRef.current.setTextEffect?.(null);
@@ -218,18 +249,22 @@ function PromptShaperAction({
       const record = await rpc.call("getEnhancement", { requestId });
       if (pendingRef.current !== active) return;
       if (record === null || record.status === "running") return;
+
+      // A composer change is visible during render before the passive scope
+      // reconciliation effect moves pendingRef to the destination scope. Do
+      // not delete the source scope's durable request in that window. Thread
+      // navigation can recover and consume the terminal result on return;
+      // non-thread scope changes are still cleared/cancelled by reconciliation.
+      if (active.scopeKey !== composerScopeKeyRef.current) {
+        clearLoadingEffects();
+        return;
+      }
+
       clearLoadingEffects();
       setPendingRequest(null);
 
       if (record.status === "failed") {
         toast.error(record.error);
-        return;
-      }
-
-      if (active.scopeKey !== composerScopeKeyRef.current) {
-        toast.info(
-          "Enhancement finished after you changed composers. Nothing was replaced.",
-        );
         return;
       }
       applyEnhancement(record.enhancedPrompt);
@@ -244,6 +279,10 @@ function PromptShaperAction({
 
   useEffect(() => {
     if (!isRunning || pending === null) return;
+    if (reconcileRecoveredPendingRef.current) {
+      reconcileRecoveredPendingRef.current = false;
+      void consumeResult(pending.requestId);
+    }
     const timer = window.setInterval(() => {
       void consumeResult(pending.requestId);
     }, 2_000);
@@ -272,6 +311,24 @@ function PromptShaperAction({
         projectId,
         sourceThreadId: threadId,
       });
+    } catch (error) {
+      // Startup can fail after navigation has detached this component. Clear
+      // the exact durable marker even when this instance no longer owns the
+      // active composer, or returning would recover a request the server never
+      // created and leave the action running indefinitely.
+      clearPendingRequest(request);
+      if (pendingRef.current !== request) return;
+      clearLoadingEffects();
+      setPendingRequest(null);
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Could not enhance the prompt.",
+      );
+      return;
+    }
+
+    try {
       await consumeResult(request.requestId);
     } catch (error) {
       if (pendingRef.current !== request) return;
@@ -320,6 +377,7 @@ function PromptShaperAction({
   const actionLabel = isRunning
     ? "Cancel prompt improvement"
     : "Improve prompt";
+  const controlLabel = canUndo ? "Undo prompt" : actionLabel;
   const iconName =
     isRunning
       ? showCancelIcon
@@ -337,13 +395,15 @@ function PromptShaperAction({
               variant="ghost"
               size="icon"
               className={
-                isRunning && !showCancelIcon
+                canUndo
+                  ? "h-7 w-auto gap-1 px-1.5 text-muted-foreground"
+                  : isRunning && !showCancelIcon
                   ? "size-7 text-success"
                   : "size-7 text-muted-foreground"
               }
               disabled={isDisabled}
               aria-busy={isRunning}
-              aria-label={actionLabel}
+              aria-label={controlLabel}
               onMouseDown={(event) => {
                 // Keep narrow/inline composers expanded until the click is
                 // delivered. Their action row collapses when the editor blurs.
@@ -357,51 +417,44 @@ function PromptShaperAction({
               }
               onMouseEnter={() => setIsHovered(true)}
               onMouseLeave={() => setIsHovered(false)}
-              onClick={() => void (isRunning ? cancel() : enhance())}
-            >
-              <span
-                className={
-                  isRunning && !showCancelIcon
-                    ? "inline-flex size-4 items-center justify-center motion-safe:animate-pulse"
-                    : "inline-flex size-4 items-center justify-center"
+              onClick={() => {
+                if (canUndo) {
+                  undo();
+                  return;
                 }
-              >
-                <Icon
-                  name={iconName}
+                void (isRunning ? cancel() : enhance());
+              }}
+            >
+              {canUndo ? (
+                <>
+                  <Icon name="AiContentGenerator01" aria-hidden="true" />
+                  <Icon name="ArrowTurnBackward" aria-hidden="true" />
+                </>
+              ) : (
+                <span
                   className={
                     isRunning && !showCancelIcon
-                      ? "animate-shine-icon motion-safe:[animation-duration:1.5s]"
-                      : undefined
+                      ? "inline-flex size-4 items-center justify-center motion-safe:animate-pulse"
+                      : "inline-flex size-4 items-center justify-center"
                   }
-                  aria-hidden="true"
-                />
-              </span>
+                >
+                  <Icon
+                    name={iconName}
+                    className={
+                      isRunning && !showCancelIcon
+                        ? "animate-shine-icon motion-safe:[animation-duration:1.5s]"
+                        : undefined
+                    }
+                    aria-hidden="true"
+                  />
+                </span>
+              )}
             </Button>
           </TooltipTrigger>
           <TooltipContent side="top">
-            {isRunning ? "Cancel" : "Improve prompt"}
+            {canUndo ? "Undo prompt" : isRunning ? "Cancel" : "Improve prompt"}
           </TooltipContent>
         </Tooltip>
-        {canUndo ? (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="size-7 text-muted-foreground"
-                aria-label="Undo prompt"
-                onMouseDown={(event) => {
-                  event.preventDefault();
-                }}
-                onClick={undo}
-              >
-                <Icon name="ArrowTurnBackward" aria-hidden="true" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="top">Undo prompt</TooltipContent>
-          </Tooltip>
-        ) : null}
       </div>
     </TooltipProvider>
   );

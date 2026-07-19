@@ -8,7 +8,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import type { ComponentType } from "react";
+import { StrictMode, type ComponentType } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
 
@@ -323,13 +323,20 @@ describe("Prompt Shaper composer action", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(toast.success).not.toHaveBeenCalled();
 
-    const improveButtonAfterReplacement = screen.getByRole("button", {
-      name: "Improve prompt",
-    });
     const undoButton = screen.getByRole("button", {
       name: "Undo prompt",
     });
-    expect(improveButtonAfterReplacement.nextElementSibling).toBe(undoButton);
+    expect(
+      screen.queryByRole("button", { name: "Improve prompt" }),
+    ).toBeNull();
+    expect(
+      undoButton.closest("[data-prompt-shaper-actions]")?.querySelectorAll(
+        "button",
+      ),
+    ).toHaveLength(1);
+    expect(
+      undoButton.querySelector('[data-icon="AiContentGenerator01"]'),
+    ).not.toBeNull();
     expect(
       undoButton.querySelector('[data-icon="ArrowTurnBackward"]'),
     ).not.toBeNull();
@@ -350,6 +357,146 @@ describe("Prompt Shaper composer action", () => {
     expect(
       improveButton.querySelector('[data-icon="AiContentGenerator01"]'),
     ).not.toBeNull();
+  });
+
+  it("keeps a thread enhancement running while navigating away and back", async () => {
+    const result = deferred<{
+      requestId: string;
+      helperThreadId: string;
+      status: "complete";
+      enhancedPrompt: string;
+      assumptions: null;
+      createdAt: number;
+      completedAt: number;
+    }>();
+    const cancelEnhancement = vi.fn(() => ({ cancelled: true as const }));
+    resetTestPluginRuntime({
+      text: "rough source draft",
+      attachments: ["source-brief.png"],
+      scope: { kind: "thread", threadId: "thr_source" },
+      rpc: {
+        startEnhancement: () => ({
+          requestId: REQUEST_ID,
+          helperThreadId: "thr_helper",
+        }),
+        getEnhancement: () => result.promise,
+        cancelEnhancement,
+      },
+    });
+    const Action = await loadAction();
+    render(<Action projectId="proj_1" threadId="thr_source" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Improve prompt" }));
+    await waitFor(() => {
+      expect(getTestPluginRuntime().textEffect).toBe("shimmer");
+      expect(window.sessionStorage.length).toBe(1);
+    });
+
+    act(() => {
+      setTestComposerScope({ kind: "thread", threadId: "thr_other" });
+      setTestComposerText("other thread draft");
+    });
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: "Improve prompt" }),
+      ).not.toBeNull();
+      expect(getTestPluginRuntime().textEffect).toBeNull();
+      expect(getTestPluginRuntime().threadRowStatus).toBeNull();
+    });
+    expect(cancelEnhancement).not.toHaveBeenCalled();
+    expect(window.sessionStorage.length).toBe(1);
+
+    act(() => {
+      setTestComposerScope({ kind: "thread", threadId: "thr_source" });
+      setTestComposerText("rough source draft");
+    });
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", {
+          name: "Cancel prompt improvement",
+        }),
+      ).not.toBeNull();
+      expect(getTestPluginRuntime().textEffect).toBe("shimmer");
+    });
+    expect(cancelEnhancement).not.toHaveBeenCalled();
+
+    await act(async () => {
+      result.resolve({
+        requestId: REQUEST_ID,
+        helperThreadId: "thr_helper",
+        status: "complete",
+        enhancedPrompt: "Enhanced after thread navigation.",
+        assumptions: null,
+        createdAt: 1,
+        completedAt: 2,
+      });
+      await result.promise;
+    });
+
+    await waitFor(() => {
+      expect(getTestPluginRuntime().text).toBe(
+        "Enhanced after thread navigation.",
+      );
+      expect(window.sessionStorage.length).toBe(0);
+    });
+    expect(getTestPluginRuntime().attachments).toEqual(["source-brief.png"]);
+  });
+
+  it("preserves a completion that races with thread navigation", async () => {
+    const result = deferred<{
+      requestId: string;
+      helperThreadId: string;
+      status: "complete";
+      enhancedPrompt: string;
+      assumptions: null;
+      createdAt: number;
+      completedAt: number;
+    }>();
+    resetTestPluginRuntime({
+      text: "rough source draft",
+      scope: { kind: "thread", threadId: "thr_source" },
+      rpc: {
+        startEnhancement: () => ({
+          requestId: REQUEST_ID,
+          helperThreadId: "thr_helper",
+        }),
+        getEnhancement: () => result.promise,
+        cancelEnhancement: () => ({ cancelled: true as const }),
+      },
+    });
+    const Action = await loadAction();
+    render(<Action projectId="proj_1" threadId="thr_source" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Improve prompt" }));
+    await waitFor(() => expect(window.sessionStorage.length).toBe(1));
+
+    await act(async () => {
+      setTestComposerScope({ kind: "thread", threadId: "thr_other" });
+      setTestComposerText("other thread draft");
+      result.resolve({
+        requestId: REQUEST_ID,
+        helperThreadId: "thr_helper",
+        status: "complete",
+        enhancedPrompt: "Enhanced while navigating.",
+        assumptions: null,
+        createdAt: 1,
+        completedAt: 2,
+      });
+      await result.promise;
+    });
+
+    expect(getTestPluginRuntime().text).toBe("other thread draft");
+    expect(window.sessionStorage.length).toBe(1);
+
+    act(() => {
+      setTestComposerScope({ kind: "thread", threadId: "thr_source" });
+      setTestComposerText("rough source draft");
+    });
+
+    await waitFor(() => {
+      expect(getTestPluginRuntime().text).toBe("Enhanced while navigating.");
+      expect(window.sessionStorage.length).toBe(0);
+    });
   });
 
   it("invalidates inline Undo after the enhanced draft is edited or sent", async () => {
@@ -672,5 +819,174 @@ describe("Prompt Shaper composer action", () => {
     expect(
       screen.queryByRole("button", { name: "Undo prompt" }),
     ).toBeNull();
+  });
+
+  it("keeps pending work across unmount and applies its result after returning", async () => {
+    const result = deferred<{
+      requestId: string;
+      helperThreadId: string;
+      status: "complete";
+      enhancedPrompt: string;
+      assumptions: null;
+      createdAt: number;
+      completedAt: number;
+    }>();
+    const cancelEnhancement = vi.fn(() => ({ cancelled: true as const }));
+    resetTestPluginRuntime({
+      text: "side-chat draft before deactivation",
+      attachments: ["side-chat-brief.png"],
+      scope: {
+        kind: "side-chat",
+        projectId: "proj_1",
+        parentThreadId: "thr_parent",
+        tabId: "side-chat:one",
+        childThreadId: "thr_child",
+      },
+      rpc: {
+        startEnhancement: () => ({
+          requestId: REQUEST_ID,
+          helperThreadId: "thr_helper",
+        }),
+        getEnhancement: () => result.promise,
+        cancelEnhancement,
+      },
+    });
+    const Action = await loadAction();
+    const view = render(
+      <Action key="active" projectId="proj_1" threadId="thr_child" />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Improve prompt" }));
+    await waitFor(() => {
+      expect(getTestPluginRuntime().textEffect).toBe("shimmer");
+      expect(window.sessionStorage.length).toBe(1);
+    });
+
+    act(() => {
+      view.unmount();
+    });
+
+    expect(cancelEnhancement).not.toHaveBeenCalled();
+    expect(window.sessionStorage.length).toBe(1);
+    expect(getTestPluginRuntime().textEffect).toBeNull();
+    expect(getTestPluginRuntime().threadRowStatus).toBeNull();
+
+    await act(async () => {
+      result.resolve({
+        requestId: REQUEST_ID,
+        helperThreadId: "thr_helper",
+        status: "complete",
+        enhancedPrompt: "Enhanced result completed while away.",
+        assumptions: null,
+        createdAt: 1,
+        completedAt: 2,
+      });
+      await result.promise;
+      await Promise.resolve();
+    });
+
+    expect(getTestPluginRuntime().text).toBe(
+      "side-chat draft before deactivation",
+    );
+
+    render(<Action projectId="proj_1" threadId="thr_child" />);
+    await waitFor(() => {
+      expect(getTestPluginRuntime().text).toBe(
+        "Enhanced result completed while away.",
+      );
+      expect(window.sessionStorage.length).toBe(0);
+      expect(
+        screen.getByRole("button", { name: "Undo prompt" }),
+      ).not.toBeNull();
+    });
+    expect(cancelEnhancement).not.toHaveBeenCalled();
+    expect(getTestPluginRuntime().attachments).toEqual([
+      "side-chat-brief.png",
+    ]);
+  });
+
+  it("clears a detached pending marker when helper startup fails", async () => {
+    let rejectStart!: (error: Error) => void;
+    const start = new Promise<never>((_resolve, reject) => {
+      rejectStart = reject;
+    });
+    resetTestPluginRuntime({
+      text: "draft whose helper cannot start",
+      scope: { kind: "thread", threadId: "thr_source" },
+      rpc: {
+        startEnhancement: () => start,
+        getEnhancement: () => null,
+      },
+    });
+    const Action = await loadAction();
+    const view = render(
+      <Action projectId="proj_1" threadId="thr_source" />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Improve prompt" }));
+    await waitFor(() => expect(window.sessionStorage.length).toBe(1));
+
+    view.unmount();
+    await act(async () => {
+      rejectStart(new Error("agent unavailable"));
+      await Promise.resolve();
+    });
+
+    expect(window.sessionStorage.length).toBe(0);
+    expect(getTestPluginRuntime().text).toBe(
+      "draft whose helper cannot start",
+    );
+
+    render(<Action projectId="proj_1" threadId="thr_source" />);
+    expect(
+      screen.getByRole("button", { name: "Improve prompt" }),
+    ).not.toBeNull();
+    expect(getTestPluginRuntime().textEffect).toBeNull();
+    expect(getTestPluginRuntime().threadRowStatus).toBeNull();
+  });
+
+  it("keeps recovered pending work through StrictMode and a real unmount", async () => {
+    const cancelEnhancement = vi.fn(() => ({ cancelled: true as const }));
+    window.sessionStorage.setItem(
+      "bb-plugin-prompt-shaper:pending:thread:thr_source",
+      JSON.stringify({
+        requestId: REQUEST_ID,
+        scopeKey: "thread:thr_source",
+      }),
+    );
+    resetTestPluginRuntime({
+      text: "recovered draft",
+      scope: { kind: "thread", threadId: "thr_source" },
+      rpc: {
+        getEnhancement: () => ({
+          requestId: REQUEST_ID,
+          helperThreadId: "thr_helper",
+          status: "running",
+          createdAt: 1,
+        }),
+        cancelEnhancement,
+      },
+    });
+    const Action = await loadAction();
+    const view = render(
+      <StrictMode>
+        <Action projectId="proj_1" threadId="thr_source" />
+      </StrictMode>,
+    );
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: "Cancel prompt improvement" }),
+      ).not.toBeNull();
+      expect(getTestPluginRuntime().textEffect).toBe("shimmer");
+      expect(window.sessionStorage.length).toBe(1);
+    });
+    expect(cancelEnhancement).not.toHaveBeenCalled();
+
+    view.unmount();
+    expect(cancelEnhancement).not.toHaveBeenCalled();
+    expect(window.sessionStorage.length).toBe(1);
+    expect(getTestPluginRuntime().textEffect).toBeNull();
+    expect(getTestPluginRuntime().threadRowStatus).toBeNull();
   });
 });
