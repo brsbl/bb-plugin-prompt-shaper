@@ -1,6 +1,8 @@
-# Prompt Shaper
+# Improve Prompt
 
-Prompt Shaper adds **Enhance prompt** to the bb composer. It turns the current rough draft into a concise, context-complete prompt, puts the result back into the same composer, and leaves sending to you.
+> This standalone repository is retained for history. Improve Prompt now lives in [`brsbl/bb-plugins`](https://github.com/brsbl/bb-plugins/tree/main/plugins/improve-prompt); its stable plugin ID remains `prompt-shaper`.
+
+Improve Prompt adds **Improve prompt** to the bb composer. It turns the current rough draft into a concise, context-complete prompt, puts the result back into the same composer, and leaves sending to you.
 
 ## How It Works
 
